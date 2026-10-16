@@ -1,72 +1,56 @@
 # Multi-Agent Cybersecurity Investigation & Attack-Path Analysis
 
-This project investigates how an entity in a synthetic enterprise environment may be connected to critical assets. It combines relationship-aware retrieval from Neo4j with a LangGraph workflow that gathers graph evidence, assesses candidate paths, and decides whether another investigation step is needed.
+A graph-based cybersecurity investigation project that uses AI agents to explore how enterprise identities and systems may expose critical databases. It combines Neo4j graph retrieval with a LangGraph workflow to turn natural-language security questions into evidence-backed path assessments.
 
-The goal is to make exposure paths easier to understand: **which systems and identities connect a user to a critical asset, what graph evidence supports that path, and where the evidence is incomplete.** The project is intended for defensive analysis of synthetic data. It does not execute exploits or access real enterprise infrastructure.
+The project supports questions such as:
+
+- “If Employee-17 is compromised, which critical databases could be exposed?”
+- “Can Employee-17 access Customer-DB through Payroll-App?”
+
+These are example questions used by the entry points; investigations use the entities and relationships in the connected Neo4j database.
 
 ## How it works
 
-- **Coordinator:** reviews the investigation state and chooses whether to retrieve graph evidence, assess risk, or stop.
-- **Graph Investigator:** resolves entity names and chooses from predefined, read-only graph operations. It does not write arbitrary Cypher. Searches include path discovery, neighborhood expansion, permission lookup, and vulnerability lookup.
-- **Risk Analyst:** assesses candidate paths using the retrieved relationships. It can identify missing evidence; network connectivity alone is not treated as proof of database authorization.
-- **LangGraph:** carries shared state between agents, routes their work, and supports repeated investigation with stop conditions.
-- **Neo4j:** is the source of truth for entities, relationships, permissions, dependencies, vulnerabilities, and critical asset labels. Python/Cypher performs the actual bounded queries.
+Three agents collaborate through a shared investigation state:
 
-The coordinator can send work back for more evidence or finish with an insufficient-evidence or iteration-limit status. Investigations have a configurable maximum of five rounds in the current entry points.
+1. **Coordinator:** interprets the investigation goal and decides whether to gather graph evidence, assess candidate paths, or finalize the result.
+2. **Graph Investigator:** resolves entity names or IDs and selects predefined, read-only searches for paths to critical assets, nearby relationships, permissions, and vulnerabilities. Python executes the Cypher queries and records the evidence.
+3. **Risk Analyst:** evaluates candidate paths using retrieved relationship evidence and classifies each as confirmed, rejected, or needing more evidence. It distinguishes network connectivity from database access permissions.
 
-## Graph model
+LangGraph routes work between the agents and maintains evidence, candidate paths, findings, open questions, and investigation history. The Coordinator can request further retrieval when an assessment needs additional facts. The workflow tracks progress and applies stopping conditions before producing a final status and summary.
 
-The synthetic enterprise graph uses labeled nodes such as:
+## Enterprise graph
 
-| Node labels                     | Example properties                     |
-| ------------------------------- | -------------------------------------- |
-| `User`, `Device`, `Role`  | name, department, status, network zone |
-| `Application`, `Server`     | name, environment, business function   |
-| `ServiceAccount`              | name, privilege level, status          |
-| `Database`, `CriticalAsset` | name, classification, criticality      |
-| `Vulnerability`               | name, severity, status, effect         |
+Neo4j represents enterprise entities such as users, devices, roles, applications, servers, service accounts, databases, and vulnerabilities. Assets marked with the `CriticalAsset` label are the targets of exposure-path searches.
 
-Relationships describe how entities connect, for example `USES`, `MEMBER_OF`, `HAS_PERMISSION_ON`, `RUNS_ON`, `USES_IDENTITY`, `CONNECTED_TO`, `DEPENDS_ON`, and `HAS_VULNERABILITY`. Permission level, network port, and protocol can be stored as relationship properties. `CriticalAsset` is an additional label on assets that should be included in critical-asset path searches.
+Relationships capture identity membership, system usage, application hosting, service identities, permissions, network connectivity, dependencies, and vulnerabilities. The investigation uses these connections and their properties to explain potential routes from an entity to a critical asset.
 
-An illustrative path in the sample graph is:
+## Interfaces and results
 
-```text
-Employee-17
-  -[:MEMBER_OF]-> Finance-User-Role
-  -[:HAS_PERMISSION_ON {permission: "USE"}]-> Payroll-App
-  -[:RUNS_ON]-> App-Server-01
-  -[:USES_IDENTITY]-> ServiceAccount-02
-  -[:HAS_PERMISSION_ON {permission: "READ_WRITE"}]-> Customer-DB
-```
+- **Streamlit interface (`app.py`):** accepts a security question and displays the investigation status, confirmed potential exposure paths, explanations, risk findings, candidate paths, open questions, and investigation rounds.
+- **Command-line example (`main.py`):** runs a question defined in the file and prints the agent sequence, retrieved candidate paths, findings, and final summary.
 
-The graph also records a high-severity unpatched synthetic vulnerability on `App-Server-01` and a network connection from that server to `Customer-DB`. These facts provide context; the system should distinguish direct permission evidence from connectivity or vulnerability evidence.
+Findings link assessments to graph paths, preserving the distinction between a potential exposure and an actual compromise.
 
-## Repository layout
+## Project structure
 
 ```text
-.
-├── app.py                       # Streamlit interface
-├── main.py                      # Command-line example
-├── requirements.txt
-└── src/
-    ├── agents/
-    │   ├── coordinator.py       # Routing decisions
-    │   ├── graph_investigator.py # Search planning and evidence retrieval
-    │   └── risk_analyst.py      # Path assessment
-    ├── graph.py                 # LangGraph workflow and stop conditions
-    ├── prompts.py               # Agent instructions
-    ├── schema.py                # Shared state and structured result models
-    └── tools/
-        ├── graph_queries.py     # Bounded read-only Cypher operations
-        └── neo4j_client.py     # Neo4j connection
+app.py                       Streamlit interface
+main.py                      Command-line example
+requirements.txt             Python dependencies
+src/
+├── agents/
+│   ├── coordinator.py        Investigation routing
+│   ├── graph_investigator.py Search planning and evidence retrieval
+│   └── risk_analyst.py       Path assessment
+├── graph.py                  LangGraph workflow and stopping conditions
+├── prompts.py                Agent instructions
+├── schema.py                 Shared state and structured result models
+└── tools/
+    ├── graph_queries.py      Read-only Cypher operations
+    └── neo4j_client.py       Neo4j connection and query execution
 ```
-
-## Scope and current limits
-
-- The included interface and command-line entry point connect to Neo4j; the repository does not provision a database or load the sample graph automatically.
-- Path searches are bounded to four hops and up to 50 results; neighborhood expansion is bounded to two hops. These are retrieval limits, not a guarantee that every possible path has been found.
-- Findings depend on graph completeness and the evidence returned by the configured model. An unobserved path should not be interpreted as proof that no path exists.
 
 ## Technology
 
-Python · LangGraph · LangChain OpenAI · Neo4j · Pydantic · Streamlit
+Python · LangGraph · LangChain OpenAI · Neo4j · Pydantic · Streamlit · python-dotenv
